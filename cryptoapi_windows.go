@@ -9,16 +9,57 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows/registry"
+	"gopkg.in/hlandau/easyconfig.v1/cflag"
 )
+
+var cryptoApiFlagLogicalStoreName = cflag.String(flagGroup, "store", "Root",
+	"Name of logical store to inject certificate into. Consider: Root, Trust, CA, My")
+var cryptoApiFlagLogicalStoreScope = cflag.String(flagGroup, "scope", "HKLM",
+	"Scope of certificate store. Valid choices: HKLM, HKCU, machine, user")
 
 // In 64-bit Windows, this key is shared between 64-bit and 32-bit applications.
 // See https://msdn.microsoft.com/en-us/library/windows/desktop/aa384253.aspx
-const cryptoApiCertStoreRegistryBase = registry.LOCAL_MACHINE
-const cryptoApiCertStoreRegistryKey = `SOFTWARE\Microsoft\EnterpriseCertificates\Root\Certificates`
+const cryptoApiCertStoreRegistryMachine = registry.LOCAL_MACHINE // HKLM
+const cryptoApiCertStoreRegistryUser = registry.CURRENT_USER     // HKCU
+
 const cryptoApiMagicName = "Namecoin"
 const cryptoApiMagicValue = 1
 
+const (
+	cryptoApiKeyFmt = `SOFTWARE\Microsoft\SystemCertificates\%s\Certificates`
+)
+
+func storeNameToKey(name string) string {
+	if name == "" {
+		return ""
+	}
+	return fmt.Sprintf(cryptoApiKeyFmt, name)
+}
+
+func cryptoApiScopeToKey(name string) (registry.Key, error) {
+	var registryBase registry.Key
+	switch cryptoApiFlagLogicalStoreScope.Value() {
+	case "user", "HKCU":
+		registryBase = cryptoApiCertStoreRegistryUser
+	case "machine", "HKLM":
+		registryBase = cryptoApiCertStoreRegistryMachine
+	default:
+		return registryBase, fmt.Errorf(`invalid store scope. consider "HKCU" or "HKLM"`)
+	}
+	return registryBase, nil
+}
+
 func injectCertCryptoApi(derBytes []byte) {
+	storeKey := storeNameToKey(cryptoApiFlagLogicalStoreName.Value())
+	if storeKey == "" {
+		log.Errorf("invalid store name: %q", cryptoApiFlagLogicalStoreName.Value())
+		return
+	}
+	registryBase, err := cryptoApiScopeToKey(cryptoApiFlagLogicalStoreScope.Value())
+	if err != nil {
+		log.Errorf("error: %s", err.Error())
+		return
+	}
 
 	// Format documentation of Microsoft's "Certificate Registry Blob":
 
@@ -65,13 +106,20 @@ func injectCertCryptoApi(derBytes []byte) {
 	certLength := len(derBytes)
 
 	// Header for a stripped Windows Certificate Registry Blob
-	certBlobHeader := []byte{0x20, 0, 0, 0, 0x01, 0, 0, 0, byte((certLength >> 0) & 0xFF), byte((certLength >> 8) & 0xFF), byte((certLength >> 16) & 0xFF), byte((certLength >> 24) & 0xFF)}
+	certBlobHeader := []byte{
+		0:  0x20,
+		4:  0x01,
+		8:  byte((certLength >> 0) & 0xFF),
+		9:  byte((certLength >> 8) & 0xFF),
+		10: byte((certLength >> 16) & 0xFF),
+		11: byte((certLength >> 24) & 0xFF),
+	}
 
 	// Construct the Blob
 	certBlob := append(certBlobHeader, derBytes...)
 
 	// Open up the cert store.
-	certStoreKey, err := registry.OpenKey(cryptoApiCertStoreRegistryBase, cryptoApiCertStoreRegistryKey, registry.ALL_ACCESS)
+	certStoreKey, err := registry.OpenKey(registryBase, storeKey, registry.ALL_ACCESS)
 	if err != nil {
 		log.Errorf("Couldn't open cert store: %s", err)
 		return
@@ -121,9 +169,19 @@ func injectCertCryptoApi(derBytes []byte) {
 }
 
 func cleanCertsCryptoApi() {
+	storeKey := storeNameToKey(cryptoApiFlagLogicalStoreName.Value())
+	if storeKey == "" {
+		log.Errorf("invalid store name: %q", cryptoApiFlagLogicalStoreName.Value())
+		return
+	}
+	registryBase, err := cryptoApiScopeToKey(cryptoApiFlagLogicalStoreScope.Value())
+	if err != nil {
+		log.Errorf("error: %s", err.Error())
+		return
+	}
 
 	// Open up the cert store.
-	certStoreKey, err := registry.OpenKey(cryptoApiCertStoreRegistryBase, cryptoApiCertStoreRegistryKey, registry.ALL_ACCESS)
+	certStoreKey, err := registry.OpenKey(registryBase, storeKey, registry.ALL_ACCESS)
 	if err != nil {
 		log.Errorf("Couldn't open cert store: %s", err)
 		return
