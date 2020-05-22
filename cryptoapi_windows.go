@@ -12,10 +12,13 @@ import (
 	"gopkg.in/hlandau/easyconfig.v1/cflag"
 )
 
-var cryptoApiFlagLogicalStoreName = cflag.String(flagGroup, "store", "Root",
-	"Name of logical store to inject certificate into. Consider: Root, Trust, CA, My")
-var cryptoApiFlagLogicalStoreScope = cflag.String(flagGroup, "scope", "HKLM",
-	"Scope of certificate store. Valid choices: HKLM, HKCU, machine, user")
+var (
+	cryptoApiFlagGroup            = cflag.NewGroup(flagGroup, "capi")
+	cryptoApiFlagLogicalStoreName = cflag.String(cryptoApiFlagGroup, "store", "Root",
+		"Name of CryptoAPI logical store to inject certificate into. Consider: Root, Trust, CA, My")
+	cryptoApiFlagLogicalStoreScope = cflag.String(cryptoApiFlagGroup, "scope", "HKLM",
+		"Scope of CryptoAPI certificate store. Valid choices: HKLM, HKCU, machine, user")
+)
 
 // In 64-bit Windows, this key is shared between 64-bit and 32-bit applications.
 // See https://msdn.microsoft.com/en-us/library/windows/desktop/aa384253.aspx
