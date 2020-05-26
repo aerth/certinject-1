@@ -16,53 +16,59 @@ var (
 	cryptoApiFlagGroup            = cflag.NewGroup(flagGroup, "capi")
 	cryptoApiFlagLogicalStoreName = cflag.String(cryptoApiFlagGroup, "store", "Root",
 		"Name of CryptoAPI logical store to inject certificate into. Consider: Root, Trust, CA, My")
-	cryptoApiFlagLogicalStoreScope = cflag.String(cryptoApiFlagGroup, "scope", "HKLM",
-		"Scope of CryptoAPI certificate store. Valid choices: HKLM, HKCU, machine, user")
+	cryptoApiFlagStoreScope = cflag.String(cryptoApiFlagGroup, "scope", "system",
+		"Scope of CryptoAPI certificate store. Valid choices: current-user, system, enterprise, group-policy")
 )
-
-// In 64-bit Windows, this key is shared between 64-bit and 32-bit applications.
-// See https://msdn.microsoft.com/en-us/library/windows/desktop/aa384253.aspx
-const cryptoApiCertStoreRegistryMachine = registry.LOCAL_MACHINE // HKLM
-const cryptoApiCertStoreRegistryUser = registry.CURRENT_USER     // HKCU
 
 const cryptoApiMagicName = "Namecoin"
 const cryptoApiMagicValue = 1
 
-const (
-	cryptoApiKeyFmt = `SOFTWARE\Microsoft\SystemCertificates\%s\Certificates`
+var (
+	// cryptoApiStores consists of every implemented store.
+	// when adding a new one, the `%s` variable is optional.
+	// if `%s` exists in the Logical string, it is replaced with the value of -store flag
+	cryptoApiStores = map[string]Store{
+		"current-user": Store{registry.CURRENT_USER, `SOFTWARE\Microsoft\SystemCertificates\`, `%s\Certificates`},
+		"system":       Store{registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\SystemCertificates\`, `%s\Certificates`},
+		"enterprise":   Store{registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\EnterpriseCertificates\`, `%s\Certificates`},
+		"group-policy": Store{registry.LOCAL_MACHINE, `SOFTWARE\Policies\SystemCertificates\`, `%s\Certificates`},
+	}
 )
 
-func storeNameToKey(name string) string {
-	if name == "" {
-		return ""
-	}
-	return fmt.Sprintf(cryptoApiKeyFmt, name)
+// Store is used to generate a key to open a certificate store in the Windows Registry
+type Store struct {
+	Base     registry.Key
+	Physical string
+	Logical  string // may contain a %s, in which it would be replaced by the -store flag
 }
 
-func cryptoApiScopeToKey(name string) (registry.Key, error) {
-	var registryBase registry.Key
-	switch cryptoApiFlagLogicalStoreScope.Value() {
-	case "user", "HKCU":
-		registryBase = cryptoApiCertStoreRegistryUser
-	case "machine", "HKLM":
-		registryBase = cryptoApiCertStoreRegistryMachine
-	default:
-		return registryBase, fmt.Errorf(`invalid store scope. consider "HKCU" or "HKLM"`)
+// String human readable string, only useful for debug logs
+func (s Store) String() string {
+	return fmt.Sprintf(`%s\%s\`+s.Logical, s.Base, s.Physical, cryptoApiFlagLogicalStoreName.Value())
+}
+
+// Key generates the registry key for use in opening the store
+func (s Store) Key() string {
+	return fmt.Sprintf(`%s\`+s.Logical, s.Physical, cryptoApiFlagLogicalStoreName.Value())
+}
+
+// cryptoApiNameToStore checks that the choice is valid before returning a complete Store request
+func cryptoApiNameToStore(name string) (Store, error) {
+	store, ok := cryptoApiStores[name]
+	if !ok {
+		return Store{}, fmt.Errorf("invalid choice for physical store, consider: current-user, system, enterprise, group-policy")
 	}
-	return registryBase, nil
+	return store, nil
 }
 
 func injectCertCryptoApi(derBytes []byte) {
-	storeKey := storeNameToKey(cryptoApiFlagLogicalStoreName.Value())
-	if storeKey == "" {
-		log.Errorf("invalid store name: %q", cryptoApiFlagLogicalStoreName.Value())
-		return
-	}
-	registryBase, err := cryptoApiScopeToKey(cryptoApiFlagLogicalStoreScope.Value())
+	store, err := cryptoApiNameToStore(cryptoApiFlagStoreScope.Value())
 	if err != nil {
 		log.Errorf("error: %s", err.Error())
 		return
 	}
+	registryBase := store.Base
+	storeKey := store.Key()
 
 	// Format documentation of Microsoft's "Certificate Registry Blob":
 
@@ -172,16 +178,13 @@ func injectCertCryptoApi(derBytes []byte) {
 }
 
 func cleanCertsCryptoApi() {
-	storeKey := storeNameToKey(cryptoApiFlagLogicalStoreName.Value())
-	if storeKey == "" {
-		log.Errorf("invalid store name: %q", cryptoApiFlagLogicalStoreName.Value())
-		return
-	}
-	registryBase, err := cryptoApiScopeToKey(cryptoApiFlagLogicalStoreScope.Value())
+	store, err := cryptoApiNameToStore(cryptoApiFlagStoreScope.Value())
 	if err != nil {
 		log.Errorf("error: %s", err.Error())
 		return
 	}
+	registryBase := store.Base
+	storeKey := store.Key()
 
 	// Open up the cert store.
 	certStoreKey, err := registry.OpenKey(registryBase, storeKey, registry.ALL_ACCESS)
