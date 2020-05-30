@@ -1,7 +1,7 @@
 package certinject
 
 import (
-	"crypto/sha1" //nolint:gosec
+	"crypto/sha1" // #nosec G505
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -138,7 +138,7 @@ func injectCertCryptoApi(derBytes []byte) {
 	// Windows CryptoAPI uses the SHA-1 fingerprint to identify a cert.
 	// This is probably a Bad Thing (TM) since SHA-1 is weak.
 	// However, that's Microsoft's problem to fix, not ours.
-	fingerprint := sha1.Sum(derBytes) //nolint:gosec
+	fingerprint := sha1.Sum(derBytes) // #nosec G505
 
 	// Windows CryptoAPI uses a hex string to represent the fingerprint.
 	fingerprintHex := hex.EncodeToString(fingerprint[:])
