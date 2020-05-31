@@ -1,2 +1,3 @@
 /bin
 /cmd/certinject/certinject
+/testdata/test_cert_file.pem

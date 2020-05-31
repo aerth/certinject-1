@@ -7,7 +7,7 @@ import (
 )
 
 func TestCheckCertExpired(t *testing.T) {
-	testFilename := "test_cert_file.pem"
+	testFilename := "testdata/test_cert_file.pem"
 
 	certExpirePeriod.SetValue(5.0)
 
@@ -30,6 +30,7 @@ func TestCheckCertExpired(t *testing.T) {
 		t.Errorf("Cert expired instantly")
 	}
 
+	println("Sleeping 10 sec")
 	time.Sleep(10 * time.Second)
 
 	info2, err := os.Stat(testFilename)
