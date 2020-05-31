@@ -22,6 +22,7 @@ notifications:
 jobs:
   allow_failures:
     - stage: lint
+    - stage: lint-new
   include:
     - os: linux
       stage: lint-new
