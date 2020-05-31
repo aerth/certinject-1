@@ -1,13 +1,12 @@
 package certinject
 
 import (
-	"crypto/sha1" // #nosec G505
-	"encoding/hex"
 	"fmt"
 	"math"
 	"strings"
 	"time"
 
+	"github.com/namecoin/certinject/certificate"
 	"golang.org/x/sys/windows/registry"
 	"gopkg.in/hlandau/easyconfig.v1/cflag"
 )
@@ -70,62 +69,12 @@ func injectCertCryptoApi(derBytes []byte) {
 	registryBase := store.Base
 	storeKey := store.Key()
 
-	// Format documentation of Microsoft's "Certificate Registry Blob":
-
-	// 5c 00 00 00 // propid
-	// 01 00 00 00 // unknown (possibly a version or flags field; value is always the same in my testing)
-	// 04 00 00 00 // size (little endian)
-	// subject public key bit length // data[size]
-
-	// 19 00 00 00
-	// 01 00 00 00
-	// 10 00 00 00
-	// MD5 of ECC pubkey of certificate
-
-	// 0f 00 00 00
-	// 01 00 00 00
-	// 20 00 00 00
-	// Signature Hash
-
-	// 03 00 00 00
-	// 01 00 00 00
-	// 14 00 00 00
-	// Cert SHA1 hash
-
-	// 14 00 00 00
-	// 01 00 00 00
-	// 14 00 00 00
-	// Key Identifier
-
-	// 04 00 00 00
-	// 01 00 00 00
-	// 10 00 00 00
-	// Cert MD5 hash
-
-	// 20 00 00 00
-	// 01 00 00 00
-	// cert length
-	// cert
-
-	// But, guess what?  All you need is the "20" record.
-	// Windows will happily regenerate all the others for you, whenever you actually try to use the certificate.
-	// How cool is that?
-
-	// Length of cert
-	certLength := len(derBytes)
-
-	// Header for a stripped Windows Certificate Registry Blob
-	certBlobHeader := []byte{
-		0:  0x20,
-		4:  0x01,
-		8:  byte((certLength >> 0) & 0xFF),
-		9:  byte((certLength >> 8) & 0xFF),
-		10: byte((certLength >> 16) & 0xFF),
-		11: byte((certLength >> 24) & 0xFF),
+	cert, err := certificate.FromBytes(derBytes)
+	if err != nil {
+		log.Errorf("Couldn't parse DER bytes: %s", err)
+		return
 	}
-
-	// Construct the Blob
-	certBlob := append(certBlobHeader, derBytes...)
+	certBlob := cert.ToWindowsBlob()
 
 	// Open up the cert store.
 	certStoreKey, err := registry.OpenKey(registryBase, storeKey, registry.ALL_ACCESS)
@@ -138,10 +87,8 @@ func injectCertCryptoApi(derBytes []byte) {
 	// Windows CryptoAPI uses the SHA-1 fingerprint to identify a cert.
 	// This is probably a Bad Thing (TM) since SHA-1 is weak.
 	// However, that's Microsoft's problem to fix, not ours.
-	fingerprint := sha1.Sum(derBytes) // #nosec G401
-
 	// Windows CryptoAPI uses a hex string to represent the fingerprint.
-	fingerprintHex := hex.EncodeToString(fingerprint[:])
+	fingerprintHex := cert.FingerprintHex()
 
 	// Windows CryptoAPI uses uppercase hex strings
 	fingerprintHexUpper := strings.ToUpper(fingerprintHex)
