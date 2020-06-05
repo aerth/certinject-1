@@ -55,6 +55,9 @@ func main() {
 		log.Debugf("user provided PEM encoded certificate, extracting DER bytes")
 	}
 
-	certinject.InjectCert(b)
+	if err := certinject.InjectCert(b); err != nil {
+		log.Fatale(err, "error inserting certificate")
+	}
+
 	log.Debugf("injected certificate: %q", cert)
 }
