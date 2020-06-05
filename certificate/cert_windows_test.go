@@ -4,8 +4,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
+	"unsafe"
 )
 
 func TestWindows(t *testing.T) {
@@ -25,7 +27,16 @@ func TestWindows(t *testing.T) {
 	}
 	defer cert.FreeContext(c)
 
-	fmt.Printf("badssl.com.der.cert: \n%s\n", hex.Dump(c.EncodedCert))
+	var tmp []byte
+	p := (*reflect.SliceHeader)(unsafe.Pointer(&tmp))
+	p.Data = uintptr(unsafe.Pointer(c.EncodedCert))
+	p.Len = int(c.Length)
+	p.Cap = int(c.Length)
+
+	var buf = make([]byte, c.Length)
+	copy(buf, tmp)
+
+	fmt.Printf("badssl.com.der.cert: \n%s\n", hex.Dump(buf))
 
 	return
 
