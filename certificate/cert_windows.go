@@ -86,24 +86,68 @@ func wide(s string) *uint16 {
 	return &w[0]
 }
 
-func (c Certificate) Store(physicalStoreName, logicalStoreName string) error {
-	var physicalStore uint32 = capiCurrentUser
-	var provider uintptr = capiProvSystem
-	switch physicalStoreName {
-	case "system":
-		physicalStore = capiLocalMachine
-	case "user":
-		physicalStore = capiCurrentUser
+var ErrNotReady = fmt.Errorf("this certificate is empty")
+
+func (c Certificate) FreeContext(cert *windows.CertContext) error {
+	return windows.CertFreeCertificateContext(cert)
+}
+
+// ToContext allocates a new cert context
+// Make sure to free using: windows.CertFreeCertificateContext(certContext)
+func (c Certificate) ToContext() (*windows.CertContext, error) {
+	if c.Raw == nil {
+		return nil, ErrNotReady
 	}
-	logicalStore := wide(logicalStoreName)
+
+	// "Type of encoding used. It is always acceptable to specify both the certificate and message encoding types by combining them with a bitwise-OR operation as shown"..
+	// https://docs.microsoft.com/en-us/windows/win32/api/Wincrypt/ns-wincrypt-cert_context
 	certContext, err := windows.CertCreateCertificateContext(
 		encodingX509ASN|encodingPKCS7,
 		&c.Raw[0],
 		uint32(len(c.Raw)))
 	if err != nil {
+		return nil, fmt.Errorf("error creating context: %v", err)
+	}
+
+	fmt.Printf("Certificate Context: %02x\n", certContext.EncodedCert)
+
+	return certContext, nil
+}
+
+func (c Certificate) Store(physicalStoreName, logicalStoreName string) error {
+	certContext, err := c.ToContext()
+	if err != nil {
 		return fmt.Errorf("error creating context: %v", err)
 	}
+
 	defer windows.CertFreeCertificateContext(certContext)
+
+	if err := storeCertContext(certContext, physicalStoreName, logicalStoreName); err != nil {
+		return fmt.Errorf("error storing cert context: %v", err)
+	}
+
+	return nil
+}
+
+func storeCertContext(ctx *windows.CertContext, physicalStoreName, logicalStoreName string) error {
+
+	var (
+		physicalStore uint32  = capiCurrentUser
+		provider      uintptr = capiProvSystem
+		logicalStore  *uint16 = wide(logicalStoreName)
+	)
+
+	// LocalMachine / CurrentUser
+	switch physicalStoreName {
+	case "system":
+		physicalStore = capiLocalMachine
+	case "user":
+		physicalStore = capiCurrentUser
+	default:
+		return fmt.Errorf("invalid physical store name: %q (try: user,system", physicalStoreName)
+	}
+
+	// open the store
 	userStore, err := windows.CertOpenStore(
 		provider,
 		0,
@@ -113,8 +157,12 @@ func (c Certificate) Store(physicalStoreName, logicalStoreName string) error {
 	if err != nil {
 		return fmt.Errorf("error opening store: %v", err)
 	}
+
+	// free when this function returns
 	defer windows.CertCloseStore(userStore, 0)
-	if err := windows.CertAddCertificateContextToStore(userStore, certContext, windows.CERT_STORE_ADD_ALWAYS, nil); err != nil {
+
+	// store the certificate
+	if err := windows.CertAddCertificateContextToStore(userStore, ctx, windows.CERT_STORE_ADD_ALWAYS, nil); err != nil {
 		return fmt.Errorf("error adding certificate to store: %v", err)
 	}
 	return nil

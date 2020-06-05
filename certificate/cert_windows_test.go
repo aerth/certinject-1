@@ -1,10 +1,11 @@
 package certificate
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
-	"testing"
 	"strings"
+	"testing"
 )
 
 func TestWindows(t *testing.T) {
@@ -17,9 +18,21 @@ func TestWindows(t *testing.T) {
 	b := cert.ToWindowsBlob()
 	fmt.Fprintf(os.Stderr, "Blob: %02X\n", b)
 
-	fmt.Println("trying to store alternate way")
-	if err := cert.Store("user", "ROOT"); err != nil {
+	c, err := cert.ToContext()
+	if err != nil {
 		t.Fatal(err)
 		return
 	}
+	defer cert.FreeContext(c)
+
+	fmt.Printf("badssl.com.der.cert: \n%s\n", hex.Dump(c.EncodedCert))
+
+	return
+
+	/*
+		if err := cert.Store("user", "ROOT"); err != nil {
+			t.Fatal(err)
+			return
+		}
+	*/
 }
